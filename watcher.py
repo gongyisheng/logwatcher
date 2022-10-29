@@ -13,7 +13,7 @@ DIR_PICK_TYPE = 2
 class FileWatcher(object):
     def __init__(
         self, 
-        path: Union[str, List[str]], 
+        path: Union[str, List[str]]=None, 
         every: bool=False, 
         exclude: Union[str, List[str]]=None, 
         interval: int=60,
@@ -23,12 +23,12 @@ class FileWatcher(object):
         """ 
         self.files_included = self.parse_path(path) # file paths to watch
         self.files_excluded = self.parse_path(exclude)
-        self.files = [f for f in self.files_included if f not in self.files_excluded]
-        self.dirs = self.parse_path(path, DIR_PICK_TYPE) if every else [] # dir paths to watch for new files
+        # self.dirs = self.parse_path(path, DIR_PICK_TYPE) if every else [] # dir paths to watch for new files
         self.handlers = [] # a list of handlers
 
-        self.fds = {p:self.open(p) for p in self.files} # file descriptors
-        self.progress = {p:0 for p in self.files} # file watch progress
+        self.fds = {} # file descriptors
+        self.progress = {} # progress of each file
+        self._prepare()
         
         self.queue = Queue(qmaxsize)
         self.interval = interval
@@ -66,23 +66,29 @@ class FileWatcher(object):
 
         return _path
     
-    def add_path(self, path):
+    def add_path(self, path: Union[str, List[str]]) -> None:
         """
         add file path to watch
         """
         _path = self.parse_path(path)
         for p in _path:
-            if p not in self.fds.keys():
-                self.fds[p] = self.open(p)
-                self.progress[p] = 0
-    
-    def add_dir(self, path):
+            self.files_included.update(p)
+
+    def exclude_path(self, path: Union[str, List[str]]) -> None:
         """
-        add dir path to watch
+        exclude file path
         """
-        _path = self.parse_path(path, pick_type=DIR_PICK_TYPE)
+        _path = self.parse_path(path)
         for p in _path:
-            self.dirs.append(p)
+            self.files_excluded.update(p)
+    
+    # def add_dir(self, path):
+    #     """
+    #     add dir path to watch
+    #     """
+    #     _path = self.parse_path(path, pick_type=DIR_PICK_TYPE)
+    #     for p in _path:
+    #         self.dirs.append(p)
 
     def open(self, path):
         """
@@ -108,6 +114,10 @@ class FileWatcher(object):
         if path in self.fds.keys():
             self.fds[path].close()
             self.fds[path] = None
+
+    def _prepare(self):
+        self.fds = {p:self.open(p) for p in self.files_included if p not in self.files_excluded}
+        self.progress = {p:0 for p in self.files_included if p not in self.files_excluded}
 
     async def watch_file(self, path):
         """
@@ -201,6 +211,7 @@ class FileWatcher(object):
         """
         run file watcher
         """
+        self._prepare()
         tasks = [asyncio.create_task(self.watch_file(p)) for p in self.paths]
         tasks += [asyncio.create_task(self.watch_dir(p)) for p in self.dirs]
         tasks += [asyncio.create_task(self.handle_msg(self.get()))]
