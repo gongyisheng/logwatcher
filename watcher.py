@@ -1,43 +1,65 @@
 import asyncio
 import logging
 import os
+from typing import List, Set, Union
 
 from glob import glob
 from queue import Queue
+from typing import Optional
 
 FILE_PICK_TYPE = 1
 DIR_PICK_TYPE = 2
 
 class FileWatcher(object):
-    def __init__(self, path, interval=60, qmaxsize=1000):
+    def __init__(
+        self, 
+        path: Union[str, List[str]], 
+        every: bool=False, 
+        exclude: Union[str, List[str]]=None, 
+        interval: int=60,
+        qmaxsize: int=1000) -> None:
         """
         Initialize file watcher
-        """
-        self.paths = self.parse_path(path) # file paths to watch
-        self.dirs = [] # dir paths to watch for new files
+        """ 
+        self.files_included = self.parse_path(path) # file paths to watch
+        self.files_excluded = self.parse_path(exclude)
+        self.files = [f for f in self.files_included if f not in self.files_excluded]
+        self.dirs = self.parse_path(path, DIR_PICK_TYPE) if every else [] # dir paths to watch for new files
         self.handlers = [] # a list of handlers
 
-        self.fds = {p:self.open(p) for p in self.paths} # file descriptors
-        self.progress = {p:0 for p in self.paths} # file watch progress
+        self.fds = {p:self.open(p) for p in self.files} # file descriptors
+        self.progress = {p:0 for p in self.files} # file watch progress
         
         self.queue = Queue(qmaxsize)
         self.interval = interval
         self.stop_watch_flag = False
+
+    def parse_path(self, path: Union[str, List[str]], pick_type: int=FILE_PICK_TYPE) -> Set[str]:
+        if isinstance(path, str):
+            return self._parse_path(path, pick_type)
+        elif isinstance(path, list):
+            _path = set()
+            for p in path:
+                _path.update(self._parse_path(p, pick_type))
+            return _path
     
-    def parse_path(self, path, pick_type=FILE_PICK_TYPE):
+    def _parse_path(self, path: str, pick_type: int=FILE_PICK_TYPE) -> Set[str]:
         """
         parse unix-style path to a list of paths,
         e.g. /var/log/*.log -> ["/var/log/a.log", "/var/log/b.log"]
         you can choose either file or dir as the result
         """
-        _path = []
+        _path = set()
+        if path is None:
+            return _path
+
         try:
             for p in glob(path):
                 abspath = os.path.abspath(p)
                 if pick_type==FILE_PICK_TYPE and os.path.isfile(abspath):
-                    _path.append(abspath)
+                    _path.add(abspath)
                 elif pick_type==DIR_PICK_TYPE and os.path.isdir(abspath):
-                    _path.append(abspath)
+                    _path.add(abspath)
         except Exception as e:
             _path = []
             logging.warning(f"Parse path error: {str(e)}")
